@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>Homework 2 Graph</title>
+<style>
+  .link {
+    stroke: gray;
+    stroke-width: 1.5px;
+  }
+
+  .node {
+    fill: #66CC66;
+    stroke: #000;
+    stroke-width: 1px;
+  }
+
+  .node:hover {
+    fill: red;
+  }
+
+  /* tooltip adapted from http://bl.ocks.org/Caged/6476579 */
+  .d3-tip {
+  line-height: 1;
+  font-weight: normal;
+  font-size: 9;
+  padding: 6px;
+  background: rgba(0, 0, 0, 0.8);
+  color: #fff;
+  border-radius: 2px;
+  }
+
+</style>
+<body>
+<script src="http://d3js.org/d3.v3.min.js"></script>
+<script src="http://labratrevenge.com/d3-tip/javascripts/d3.tip.v0.6.3.js"></script>
+  <form>
+  Layout:
+    <label><input type="radio" name="layout" value="force" checked> Force</label>
+    <label><input type="radio" name="layout" value="random" > Random</label>
+    <label><input type="radio" name="layout" value="radial"> Radial</label>  
+    <label><input type="radio" name="layout" value="line"> Line</label>
+    <label><input type="radio" name="layout" value="line_cat"> Line by Category</label>
+  </form>
+  <form>
+  Line Axis Format:
+    <label><input type="radio" name="color" value="index" checked> Index Scale</label>
+    <label><input type="radio" name="color" value="time" > Time Scale</label>
+  </form>
+  <form>
+  Color:
+    <label><input type="radio" name="color" value="nocolor" checked> None</label>
+    <label><input type="radio" name="color" value="color_cat" > Category</label>
+  </form>
+  <form>
+  Size:
+    <label><input type="radio" name="size" value="nosize" checked> None</label>
+    <label><input type="radio" name="size" value="size_cat" > Category</label>
+  </form>
+<script>
+
+// d3.json("https://api.github.com/repos/Caleydo/caleydo/commits", function(error, data) {
+
+d3.json("https://api.github.com/repos/twbs/bootstrap/commits?per_page=100", function(error, data) {
+
+  // whether currently in line format
+  var line_format = false
+
+  var width = 900,
+      height = 700;
+
+  var tip = d3.tip()
+  .attr('class', 'd3-tip')
+  .offset([10, 10])
+  .direction('se')
+  .html(function(d) {
+    return "<strong>" + d.author.login + "</strong> " + new Date(d.commit.committer.date);
+  })
+
+  var svg = d3.select("body").append("svg")
+              .attr("width", width)
+              .attr("height", height);
+
+  svg.call(tip);
+
+  var users = new Array()
+  // array of users
+  data.forEach(function(x) {
+    users.push(x.author.id)
+  })
+
+  var fill = d3.scale.category10();
+  fill.domain(users);
+
+  var yscale = d3.scale.ordinal().range([0,1,2,3,4,5,6,7,8,9]);
+  yscale.domain(users);
+
+  var graph = {nodes:[], links:[]};
+
+  graph.nodes = data
+
+  console.log(graph.nodes[29])
+
+  // table of sha identifiers for each node
+  var sha_map = {};
+  graph.nodes.forEach(function(x) {
+    sha_map[x.sha] = x;
+  })
+
+  // console.log(sha_map)
+
+  graph.nodes.map(function(x) {
+    var w = x.parents.length
+    x.parents.map(function(y) {
+      if (sha_map[y.sha] != null){
+        graph.links.push({"source": sha_map[y.sha], "target": x, "weight": w})
+      }
+    })
+  })
+
+
+  // Generate the force layout
+  var force = d3.layout.force()
+      .size([width, height])
+      .charge(-50)
+      .linkDistance(10)
+      .on("tick", tick)
+      .on("start", function(d) {})
+      .on("end", function(d) {})
+
+  function tick(d) {
+
+    graph_update(0);
+  }
+
+  function random_layout() {
+    
+    line_format = false;
+
+    force.stop();
+
+    graph.nodes.forEach(function(d, i) {
+      d.x = width/4 + 2*width*Math.random()/4;
+      d.y = height/4 + 2*height*Math.random()/4;
+    })
+    
+    graph_update(500);
+  }
+
+  function force_layout() {
+
+    line_format = false;
+    force.nodes(graph.nodes)
+        .links(graph.links)
+        .start();
+  }
+
+  function line_layout(index_format) {
+
+    line_format = true;
+
+    force.stop();
+
+    var n = graph.nodes.length
+    var u = users.length
+
+    graph.nodes.forEach(function(d, i) {
+      d.y = height*0.25 + height/(u) * yscale(d.author.id);
+      // console.log(time_scale(new Date(d.commit.committer.date)));
+      if (typeof(index_format) === 'undefined'){
+        d.x = width/4 + i * width/(2*n);
+      }
+      else {
+        var maxDate = d3.max(graph.nodes,function(d){return d.commit.committer.date})
+        var minDate = d3.min(graph.nodes, function(d){return d.commit.committer.date})
+        var time_scale = d3.time.scale().domain([new Date(maxDate), new Date(minDate)]).rangeRound([width/4 , width*0.75]);
+        d.x = time_scale(new Date(d.commit.committer.date));
+      }
+    })
+
+    graph_update(500);
+  }
+
+  function line_cat_layout() {
+
+    line_format = false;
+
+    force.stop();
+
+    graph.nodes.forEach(function(d, i) {
+      d.y = height/2 + d.cat*20;
+    })
+
+    graph_update(500);
+  }
+
+  function radial_layout() {
+
+    line_format = false;
+
+    force.stop();
+
+    var r = height/2;
+
+    var arc = d3.svg.arc()
+            .outerRadius(r);
+
+    var pie = d3.layout.pie()
+    .sort(function(a, b) { return a.cat - b.cat;})
+            .value(function(d, i) { return 1; }); // equal share for each point
+
+    graph.nodes = pie(graph.nodes).map(function(d, i) {
+      d.innerRadius = 0;
+      d.outerRadius = r;
+      d.data.x = arc.centroid(d)[0]+height/2;
+      d.data.y = arc.centroid(d)[1]+width/2;
+      d.data.endAngle = d.endAngle; 
+      d.data.startAngle = d.startAngle; 
+      return d.data;
+    })
+
+    graph_update(500);
+  }
+
+  function category_color() {
+    d3.selectAll("circle").transition().duration(500).style("fill", function(d) { return fill(d.author.id); });
+  }
+
+  function category_size() {
+    d3.selectAll("circle").transition().duration(500).attr("r", function(d) { return Math.sqrt((d.cat+1)*10); });
+  }
+
+  function graph_update(delay) {
+
+    link.transition().duration(delay)
+        .attr("x1", function(d) { return d.target.x; })
+        .attr("y1", function(d) { return d.target.y; })
+        .attr("x2", function(d) { return d.source.x; })
+        .attr("y2", function(d) { return d.source.y; });
+
+    node.transition().duration(delay)
+        .attr("transform", function(d) { 
+          return "translate("+d.x+","+d.y+")"; 
+        });
+  }
+
+  d3.select("input[value=\"force\"]").on("click", force_layout);
+  d3.select("input[value=\"random\"]").on("click", random_layout);
+  d3.select("input[value=\"line\"]").on("click", line_layout);
+  d3.select("input[value=\"line_cat\"]").on("click", line_cat_layout);
+  d3.select("input[value=\"radial\"]").on("click", radial_layout);
+  d3.select("input[value=\"index\"]").on("click", function() {
+    if (line_format) {
+      line_layout();
+    }
+  });
+  d3.select("input[value=\"time\"]").on("click", function() {
+    if (line_format) {
+      line_layout(index_format = false);
+    }
+  });
+
+  d3.select("input[value=\"nocolor\"]").on("click", function() {
+    d3.selectAll("circle").transition().duration(500).style("fill", "#66CC66");
+  })
+
+  d3.select("input[value=\"color_cat\"]").on("click", category_color);
+
+  d3.select("input[value=\"nosize\"]").on("click", function() {
+    d3.selectAll("circle").transition().duration(500).attr("r", 5);
+  })
+
+  d3.select("input[value=\"size_cat\"]").on("click", category_size);
+
+  var markers = svg.append("svg:defs").selectAll("marker")
+    .data(["end"])      // Different link/path types can be defined here
+    .enter().append("svg:marker")    // This section adds in the arrows
+      .attr("id", String)
+      .attr("viewBox", "0 -5 10 10")
+      .attr("refX", 15)
+      .attr("refY", -1.5)
+      .attr("markerWidth", 6)
+      .attr("markerHeight", 6)
+      .attr("orient", "auto")
+    .append("svg:path")
+      .attr("d", "M0,-5L10,0L0,5");
+
+  var offset_y = 10;
+
+  // var line = d3.svg.line()
+  //   .x(function (d) {return d.x;})
+  //   .y(function (d) {return d.y;})
+  //   .interpolate("linear");
+
+  var link = svg.selectAll(".link")
+                .data(graph.links)
+              .enter()
+              .append("line")
+              // .append("path")
+              //   .attr("d", function (d) {
+              //     console.log(d.source.x)
+              //     return line([{
+              //       x: d.source.x,
+              //       y: d.source.y
+              //     }, {
+              //       x: d.source.x,
+              //       y: d.source.y + offset_y
+              //     }, {
+              //       x: d.target.x,
+              //       y: d.target.y + offset_y
+              //     }, {
+              //       x: d.target.x,
+              //       y: d.target.y
+              //     }])
+              //   })
+                .attr("class", "link")
+                .attr("marker-end", "url(#end)");
+
+  var node = svg.selectAll(".node")
+                .data(graph.nodes)
+              .enter()
+                .append("g").attr("class", "node")
+              .on('mouseover', tip.show)
+              .on('mouseout', tip.hide);
+
+  node.append("circle")
+      .attr("r", 5)
+
+  force_layout();
+
+})
+
+</script>
+</body>
+</html>
